@@ -30,7 +30,7 @@ def get_clique_tree(nodes, edges):
         G2.add_node(i, members=c)
     for i in G2.nodes:
         for j in G2.nodes:
-            S = G2.node[i]["members"].intersection(G2.node[j]["members"])
+            S = G2.nodes[i]["members"].intersection(G2.node[j]["members"])
             w = len(S)
             if w > 0:
                 G2.add_edge(i, j, weight=w, members=S)

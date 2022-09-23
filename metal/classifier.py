@@ -167,7 +167,7 @@ class Classifier(nn.Module):
         raise NotImplementedError
 
     def _train_model(
-        self, train_data, loss_fn, valid_data=None, log_writer=None, restore_state={}
+        self, train_data, loss_fn, mu_epochs = None, valid_data=None, log_writer=None, restore_state={}
     ):
         """The internal training routine called by train_model() after setup
 
@@ -211,7 +211,10 @@ class Classifier(nn.Module):
 
         # Train the model
         metrics_hist = {}  # The most recently seen value for all metrics
-        for epoch in range(start_iteration, train_config["n_epochs"]):
+        n_epochs = train_config["n_epochs"]
+        if mu_epochs is not None:
+            n_epochs = mu_epochs
+        for epoch in range(start_iteration, n_epochs):
             progress_bar = (
                 train_config["progress_bar"]
                 and self.config["verbose"]

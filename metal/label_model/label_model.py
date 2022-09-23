@@ -81,7 +81,7 @@ class LabelModel(Classifier):
                     [
                         j
                         for j in self.c_tree.nodes()
-                        if i in self.c_tree.node[j]["members"]
+                        if i in self.c_tree.nodes[j]["members"]
                     ]
                 ),
             }
@@ -95,7 +95,7 @@ class LabelModel(Classifier):
             L_aug = np.copy(L_ind)
             for item in chain(self.c_tree.nodes(), self.c_tree.edges()):
                 if isinstance(item, int):
-                    C = self.c_tree.node[item]
+                    C = self.c_tree.nodes[item]
                     C_type = "node"
                 elif isinstance(item, tuple):
                     C = self.c_tree[item[0]][item[1]]
@@ -159,14 +159,14 @@ class LabelModel(Classifier):
         Note that we only include the k non-abstain values of each source,
         otherwise the model not minimal --> leads to singular matrix
         """
-        L_aug = self._get_augmented_label_matrix(L)
+        L_aug = self._get_augmented_label_matrix(L, len(self.deps) > 0)
         self.d = L_aug.shape[1]
         self.O = torch.from_numpy(L_aug.T @ L_aug / self.n).float()
 
     def _generate_O_inv(self, L):
         """Form the *inverse* overlaps matrix"""
         self._generate_O(L)
-        self.O_inv = torch.from_numpy(np.linalg.inv(self.O.numpy())).float()
+        self.O_inv = torch.from_numpy(np.linalg.pinv(self.O.numpy(), rcond=1e-08)).float()
 
     def _init_params(self):
         """Initialize the learned params
@@ -238,12 +238,11 @@ class LabelModel(Classifier):
             # ei = self.c_data[(i,)]['end_index']
             # mu_i = mu[si:ei, :]
             mu_i = mu[i * self.k : (i + 1) * self.k, :]
-            c_probs[i * (self.k + 1) + 1 : (i + 1) * (self.k + 1), :] = mu_i
+            c_probs[i * (self.k + 1) + 1 : (i + 1) * (self.k + 1), :] = np.clip(mu_i, 0.01, 0.99)
 
             # The 0th row (corresponding to abstains) is the difference between
             # the sums of the other rows and one, by law of total prob
-            c_probs[i * (self.k + 1), :] = 1 - mu_i.sum(axis=0)
-        c_probs = np.clip(c_probs, 0.01, 0.99)
+            c_probs[i * (self.k + 1), :] = np.clip(1 - mu_i.sum(axis=0), 0.0001, 0.9999)
 
         if source is not None:
             return c_probs[source * (self.k + 1) : (source + 1) * (self.k + 1)]
@@ -258,7 +257,7 @@ class LabelModel(Classifier):
         """
         self._set_constants(L)
 
-        L_aug = self._get_augmented_label_matrix(L)
+        L_aug = self._get_augmented_label_matrix(L, len(self.deps) > 0)
         mu = np.clip(self.mu.detach().clone().numpy(), 0.01, 0.99)
 
         # Create a "junction tree mask" over the columns of L_aug / mu
@@ -267,7 +266,7 @@ class LabelModel(Classifier):
 
             # All maximal cliques are +1
             for i in self.c_tree.nodes():
-                node = self.c_tree.node[i]
+                node = self.c_tree.nodes[i]
                 jtm[node["start_index"] : node["end_index"]] = 1
 
             # All separator sets are -1
@@ -319,15 +318,29 @@ class LabelModel(Classifier):
     def loss_inv_Z(self, *args):
         return torch.norm((self.O_inv + self.Z @ self.Z.t())[self.mask]) ** 2
 
-    def loss_inv_mu(self, *args, l2=0):
+    def loss_inv_mu(self, *args, abstains=False, l2=0):
         loss_1 = torch.norm(self.Q - self.mu @ self.P @ self.mu.t()) ** 2
         loss_2 = torch.norm(torch.sum(self.mu @ self.P, 1) - torch.diag(self.O)) ** 2
-        return loss_1 + loss_2 + self.loss_l2(l2=l2)
+        loss_3 = 0
+        weight_3 = 10
+        if abstains == False:
+            for k in self.c_data.keys():
+                #print(k)
+                start = self.c_data[k]['start_index']
+                end = self.c_data[k]['end_index']
+                ones = torch.ones((1, self.k))
+                loss_3 += torch.norm(ones - self.mu[start:end].sum(axis=0))**2
 
-    def loss_mu(self, *args, l2=0):
+        return loss_1 + loss_2 + self.loss_l2(l2=l2) + weight_3 * loss_3
+
+    def loss_mu(self, *args, abstains=False, l2=0):
         loss_1 = torch.norm((self.O - self.mu @ self.P @ self.mu.t())[self.mask]) ** 2
         loss_2 = torch.norm(torch.sum(self.mu @ self.P, 1) - torch.diag(self.O)) ** 2
-        return loss_1 + loss_2 + self.loss_l2(l2=l2)
+
+        loss_3 = 0
+        if abstains == False and len(self.deps) == 0:
+            loss_3 = torch.norm(self.mu.reshape((self.m, self.k, self.k)).sum(axis=1) - torch.ones((self.m, self.k)))**2
+        return loss_1 + loss_2 + self.loss_l2(l2=l2) + loss_3
 
     def _set_class_balance(self, class_balance, Y_dev):
         """Set a prior for the class balance
@@ -363,6 +376,7 @@ class LabelModel(Classifier):
         deps=[],
         class_balance=None,
         log_writer=None,
+        abstains=False,
         **kwargs,
     ):
         """Train the model (i.e. estimate mu) in one of two ways, depending on
@@ -432,7 +446,7 @@ class LabelModel(Classifier):
             # Estimate \mu
             if self.config["verbose"]:
                 print("Estimating \mu...")
-            self._train_model(train_loader, partial(self.loss_inv_mu, l2=l2))
+            self._train_model(train_loader, partial(self.loss_inv_mu, abstains=abstains, l2=l2), mu_epochs=20000)
         else:
             # Compute O and initialize params
             if self.config["verbose"]:
@@ -443,4 +457,4 @@ class LabelModel(Classifier):
             # Estimate \mu
             if self.config["verbose"]:
                 print("Estimating \mu...")
-            self._train_model(train_loader, partial(self.loss_mu, l2=l2))
+            self._train_model(train_loader, partial(self.loss_mu, abstains=abstains, l2=l2))
