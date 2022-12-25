@@ -506,8 +506,11 @@ class LabelModel(Classifier):
         self._check_L(L_train)
         
         if (L_train == 0).sum() > 0 and abstains == False:
-            print("Detected abstains. Setting abstains flag.")
+            print("Detected abstains. Setting abstains flag to True.")
             abstains = True
+        elif (L_train == 0).sum() == 0 and abstains == True:
+            print("Did not detect any abstains. Setting abstains flag to False.")
+            abstains = False
 
         # Whether to take the simple conditionally independent approach, or the
         # "inverse form" approach for handling dependencies
