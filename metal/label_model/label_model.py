@@ -32,7 +32,7 @@ class LabelModel(Classifier):
             self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         else:
             self.device = torch.device("cpu")
-            
+
         print(f"Using device: {self.device}")
 
     def _check_L(self, L):
@@ -504,6 +504,10 @@ class LabelModel(Classifier):
         self._set_constants(L_train)
         self._set_dependencies(deps)
         self._check_L(L_train)
+        
+        if (L_train == 0).sum() > 0 and abstains == False:
+            print("Detected abstains. Setting abstains flag.")
+            abstains = True
 
         # Whether to take the simple conditionally independent approach, or the
         # "inverse form" approach for handling dependencies
@@ -546,29 +550,4 @@ class LabelModel(Classifier):
 
             if symmetric and self.k==2:
                 self._symmetrize_mu()
-
-
-    def _learn_higher(self, L, i, j):
-
-        assert(self.k == 2)
-        assert(0 not in L)
-
-
-        matrix = np.array([[0, 0, 0, 0, 1, 1, 1, 1],])
-
-
-
-        probs = np.zeros(8)
-
-        R = np.zeros(8)
-
-        R[0] = len(np.where(L[:, i] == 2)[0])/ len(L)
-        R[1] = len(np.where(L[:, j] == 2)[0])/ len(L)
-        R[2] = self.P[1, 1]
-
-        R[3] = self.mu[2*j, 0] * self.P[0, 0]  + self.mu[2*j + 1, 1] * self.P[1, 1]
-        R[4] = self.mu[2*i, 0] * self.P[0, 0]  + self.mu[2*i + 1, 1] * self.P[1, 1]
-
-
-        R[4] = self.mu[2*i, 0] * self.P[0, 0]  + self.mu[2*i + 1, 1] * self.P[1, 1]
 
