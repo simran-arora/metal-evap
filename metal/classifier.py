@@ -151,9 +151,9 @@ class Classifier(nn.Module):
 
         # If a single metric was given as a string (not list), return a float
         if len(scores) == 1 and not return_list:
-            return scores[0]
+            return scores[0], Y_p
         else:
-            return scores
+            return scores, Y_p
 
     def train_model(self, *args, **kwargs):
         """Trains a classifier
